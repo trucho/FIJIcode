@@ -159,64 +159,6 @@ for (i=0; i<nS; i++) {
 }
 
 
-//Left Eye
-for (i=0; i<nS; i++) {
-	setSlice(i+1); //slice index starts at 1
-	doWand(eyeL_x_now, eyeL_y_now, userTol, "Legacy");
-	run("Fit Ellipse");
-	run("Measure");
-	eyeL_time[i] = i*ifi; //time axis
-	eyeL_x[i] = getResult("X"); //get latest centroid X
-	eyeL_y[i] = getResult("Y"); //get latest centroid Y
-	eyeL_major[i] = getResult("Major"); //get latest major axis
-	eyeL_minor[i] = getResult("Minor"); //get latest minor axis
-	eyeL_angle[i] = getResult("Angle"); //get latest angle
-	eyeL_area[i] = getResult("Area"); //get latest area
-
-	// could be better to do Right and Left in same loop to check this every time.
-	eyeDistance = sqrt(pow( abs(eyeL_x[i]-eyeR_x[i]) , 2) + pow( abs(eyeL_y[i]-eyeR_y[i]) ,2));
-	
-	//check if fit was lost
-	if (eyeL_area[i] > eyeL_area_cutoff || abs(eyeL_x[i]-eyeL_x_now) > 20 || abs(eyeL_y[i]-eyeL_y_now) > 20 || eyeDistance < eyeL_major[i]/2) {
-		// if fit was lost track for a little bit
-		interrupt = true;
- 		interruptCounter = interruptCounter-1;
- 		// then stop checking
- 		if (interruptBuffer < 0) {
- 			interrupt = false;
- 		}
-	}
- 	else {
-		interruptCounter = interruptBuffer;
-		interrupt = false;
-	}
-	
-
-	if (interrupt) {
-		print (interruptBuffer);
- 		Table.deleteRows(i, i);
- 		waitForUser("Click on LEFT eye");
- 		run("Fit Ellipse");
- 		run("Measure");
- 		eyeL_time[i] = i*ifi; //time axis
- 		eyeL_x[i] = getResult("X"); //get latest centroid X
- 		eyeL_y[i] = getResult("Y"); //get latest centroid Y
- 		eyeL_major[i] = getResult("Major"); //get latest major axis
- 		eyeL_minor[i] = getResult("Minor"); //get latest minor axis
- 		eyeL_angle[i] = getResult("Angle"); //get latest angle
- 		eyeL_area[i] = getResult("Area"); //get latest area
- 	}
- 	
-	// fix angles
-	if (eyeL_angle[i]>90) {
- 		eyeL_angle[i] = eyeL_angle[i]-180;
- 	}
- 	// update values
- 	eyeL_x_now = getResult("X"); //get latest centroid X
-	eyeL_y_now = getResult("Y"); //get latest centroid Y
-	// draw ellipse
-	run("Draw", "slice");
-}
 
 setTool("rectangle");
 run("Select None");
@@ -232,14 +174,7 @@ Plot.add("line",eyeL_time,eyeL_angle);
 Plot.setLimits(0,eyeL_time[nS-1],-50.0,50.0);
 Plot.addLegend("R eye\nL eye", "Top-Right Bottom-To-Top Transparent");
 
-// Finally, save results as tsv
-OKRtable = File.open(fPath + "OKR_" + fName + ".txt");
-// use d2s() function (double to string) to specify decimal places 
-print(OKRtable, "tAxis" + "\t" + "rX" + "\t" + "rY" + "\t" + "rMajor" + "\t" + "rMinor" + "\t" + "rAngle" + "\t" + "rArea" + "\t" + "lX" + "\t" + "lY" + "\t" + "lMajor" + "\t" + "lMinor" + "\t" + "lAngle" + "\t" + "lArea");
-for (i=0;i<nS;i++) {
-	print(OKRtable, d2s(eyeR_time[i],3) + "\t" + d2s(eyeR_x[i],3) + "\t" + d2s(eyeR_y[i],3) + "\t" + d2s(eyeR_major[i],3) + "\t" + d2s(eyeR_minor[i],3) + "\t" + d2s(eyeR_angle[i],3) + "\t" + d2s(eyeR_area[i],1) + "\t" + d2s(eyeL_x[i],3) + "\t" + d2s(eyeL_y[i],3) + "\t" + d2s(eyeL_major[i],3) + "\t" + d2s(eyeL_minor[i],3) + "\t" + d2s(eyeL_angle[i],3) + "\t" + d2s(eyeL_area[i],1));
-}
-File.close(OKRtable)
+
 
 
 
