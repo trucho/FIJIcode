@@ -32,7 +32,7 @@ run("Wand Tool...", "tolerance=&userTol mode=Legacy");
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // USER input
-waitForUser("Click on RIGHT eye");
+waitForUser("Click on Swim Bladder");
 run("Measure");
 waitForUser("Click on LEFT eye");
 run("Measure");

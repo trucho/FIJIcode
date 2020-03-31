@@ -10,11 +10,8 @@
 // created Mar 20 2020 (angueyra@nih.gov)
 // update Mar 27 2020: 
 //			introduced interruption for manual correction is significant displacement in area, position or eye overlap
-// update Mar 27 2020
-//			just realized:
-// 					(1) LEFT and RIGHT are flipped -> FIXED
-//					(2) angle should be measured respect to zf axis -> FIXED
-//					(3) in PTU treated fish, center of ellipse lands in lens which is lighter than retina which messes up doWand.
+// update Mar 30 2020
+//			introduced tracking of swim bladder to derive body axis to make relative eye angle measurements rather than arbitrary
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // SetUp
@@ -23,6 +20,7 @@ close("Dup");
 close("eyePhi");
 //#@ Integer (label="Tolerance", style="slider", min=0, max =100, value=17) userTol
 userTol=17; //wandTolerance
+sbTol = 28; //wandTolerance for swim bladder
 ifi = 50/1000; //interframe interval
 fName = replace(getTitle, ".tif", "")
 fPath = getDirectory("image");
@@ -44,14 +42,14 @@ run("Wand Tool...", "tolerance=&userTol mode=Legacy");
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //get initial conditions
 
-// USER input
+//USER input
 waitForUser("Click on LEFT eye");
 run("Measure");
 eyeL_x_ini = getResult("X");
 eyeL_y_ini = getResult("Y");
 eyeL_area_cutoff = getResult("Area",0)*1.2;
-eyeL_dxWand=(cos(getResult("X"))*getResult("Major")/2)/2;
-eyeL_dyWand=-(sin(getResult("X"))*getResult("Major")/2)/2;
+eyeL_dxWand=(cos(getResult("X"))*getResult("Major")/2)*0.5;
+eyeL_dyWand=-(sin(getResult("X"))*getResult("Major")/2)*0.5;
 
 waitForUser("Click on RIGHT eye");
 run("Measure");
@@ -62,12 +60,14 @@ eyeR_dxWand=(cos(getResult("X"))*getResult("Major")/2)/2;
 eyeR_dyWand=-(sin(getResult("X"))*getResult("Major")/2)/2;
 
 waitForUser("Click on SWIM BLADDER");
+run("Find Maxima...", "prominence=10 light output=[Point Selection]");
+getSelectionCoordinates(sb_x_ini, sb_y_ini);
+sb_x_ini = sb_x_ini[0];
+sb_y_ini = sb_y_ini[0];
+doWand(sb_x_ini, sb_y_ini, sbTol, "Legacy");
+run("Fit Ellipse");
 run("Measure");
-sb_x_ini = getResult("X");
-sb_y_ini = getResult("Y");
 sb_area_cutoff = getResult("Area")*1.2;
-sb_dxWand=(cos(getResult("X"))*getResult("Major")/2)*0.8; //trying to get dark edge
-sb_dyWand=-(sin(getResult("X"))*getResult("Major")/2)*0.8; //trying to get dark edge
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -79,6 +79,10 @@ sb_dyWand=-(sin(getResult("X"))*getResult("Major")/2)*0.8; //trying to get dark 
 //eyeR_x_ini = 667;
 //eyeR_y_ini = 311;
 //eyeR_area_cutoff = 2272*1.2;
+//
+//sb_x_ini = 667;
+//sb_y_ini = 311;
+//sb_area_cutoff = 2272*1.2;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -142,8 +146,11 @@ sb_y_now = sb_y_ini;
 //Swim Bladder
 for (i=0; i<nS; i++) {
 	setSlice(i+1); //slice index starts at 1
-	//displacing point towards periphery on the major pole of the eye
-	doWand(sb_x_now+sb_dxWand, sb_y_now+sb_dyWand, userTol, "Legacy");
+	//plot point of selection (derived from previous frame)
+	makeOval(sb_x_now, sb_y_now, 5, 5);
+	run("Draw", "slice");
+
+	doWand(sb_x_now, sb_y_now, sbTol, "Legacy");
 	run("Fit Ellipse");
 	run("Measure");
 	sb_time[i] = i*ifi; //time axis
@@ -155,7 +162,67 @@ for (i=0; i<nS; i++) {
 	sb_area[i] = getResult("Area"); //get latest area
 
 	//check if fit was lost
-	if (sb_area[i] > sb_area_cutoff || abs(sb_x[i]-sb_x_now) > 20 || abs(sb_y[i]-sb_y_now) > 20) {
+	if (sb_area[i] > sb_area_cutoff || sb_area[i] < sb_area_cutoff*0.67) {
+		// if fit was lost track for a little bit
+		interrupt = true;
+ 		interruptCounter = interruptCounter-1;
+ 		// then stop checking
+ 		if (interruptBuffer < 0) {
+ 			interrupt = false;
+ 		}
+	}
+ 	else {
+		interruptCounter = interruptBuffer;
+		interrupt = false;
+	}
+	
+	if (interrupt) {
+		print (interruptBuffer);
+ 		Table.deleteRows(i, i);
+ 		waitForUser("Click on SWIM BLADDER");
+ 		run("Fit Ellipse");
+ 		run("Measure");
+ 		sb_time[i] = i*ifi; //time axis
+ 		sb_x[i] = getResult("X"); //get latest centroid X
+ 		sb_y[i] = getResult("Y"); //get latest centroid Y
+ 		sb_major[i] = getResult("Major"); //get latest major axis
+ 		sb_minor[i] = getResult("Minor"); //get latest minor axis
+ 		sb_angle[i] = getResult("Angle"); //get latest angle
+ 		sb_area[i] = getResult("Area"); //get latest area
+ 	}
+ 	
+	// fix angles
+	if (sb_angle[i]>90) {
+ 		sb_angle[i] = sb_angle[i]-180;
+ 	}
+	// draw ellipse
+	run("Draw", "slice");
+
+	// update values
+ 	run("Find Maxima...", "prominence=10 light output=[Point Selection]");
+	getSelectionCoordinates(sb_x_now, sb_y_now);
+	sb_x_now = sb_x_now[0];
+	sb_y_now = sb_y_now[0];
+}
+
+
+//Left Eye
+for (i=0; i<nS; i++) {
+	setSlice(i+1); //slice index starts at 1
+	//displacing point towards periphery on the major pole of the eye
+	doWand(eyeL_x_now+eyeL_dxWand, eyeL_y_now+eyeL_dyWand, userTol, "Legacy");
+	run("Fit Ellipse");
+	run("Measure");
+	eyeL_time[i] = i*ifi; //time axis
+	eyeL_x[i] = getResult("X"); //get latest centroid X
+	eyeL_y[i] = getResult("Y"); //get latest centroid Y
+	eyeL_major[i] = getResult("Major"); //get latest major axis
+	eyeL_minor[i] = getResult("Minor"); //get latest minor axis
+	eyeL_angle[i] = getResult("Angle"); //get latest angle
+	eyeL_area[i] = getResult("Area"); //get latest area
+
+	//check if fit was lost
+	if (eyeL_area[i] > eyeL_area_cutoff || abs(eyeL_x[i]-eyeL_x_now) > 20 || abs(eyeL_y[i]-eyeL_y_now) > 20) {
 		// if fit was lost track for a little bit
 		interrupt = true;
  		interruptCounter = interruptCounter-1;
@@ -176,172 +243,142 @@ for (i=0; i<nS; i++) {
  		waitForUser("Click on LEFT eye");
  		run("Fit Ellipse");
  		run("Measure");
- 		sb_time[i] = i*ifi; //time axis
- 		sb_x[i] = getResult("X"); //get latest centroid X
- 		sb_y[i] = getResult("Y"); //get latest centroid Y
- 		sb_major[i] = getResult("Major"); //get latest major axis
- 		sb_minor[i] = getResult("Minor"); //get latest minor axis
- 		sb_angle[i] = getResult("Angle"); //get latest angle
- 		sb_area[i] = getResult("Area"); //get latest area
+ 		eyeL_time[i] = i*ifi; //time axis
+ 		eyeL_x[i] = getResult("X"); //get latest centroid X
+ 		eyeL_y[i] = getResult("Y"); //get latest centroid Y
+ 		eyeL_major[i] = getResult("Major"); //get latest major axis
+ 		eyeL_minor[i] = getResult("Minor"); //get latest minor axis
+ 		eyeL_angle[i] = getResult("Angle"); //get latest angle
+ 		eyeL_area[i] = getResult("Area"); //get latest area
  	}
  	
 	// fix angles
-	if (sb_angle[i]>90) {
- 		sb_angle[i] = sb_angle[i]-180;
+	if (eyeL_angle[i]>90) {
+ 		eyeL_angle[i] = eyeL_angle[i]-180;
  	}
  	// update values
- 	sb_x_now = getResult("X"); //get latest centroid X
-	sb_y_now = getResult("Y"); //get latest centroid Y
-	sb_dxWand=(cos(getResult("X"))*getResult("Major")/2)*0.8; //trying to get dark edge
-	sb_dyWand=-(sin(getResult("X"))*getResult("Major")/2)*0.8; //trying to get dark edge
+ 	eyeL_x_now = getResult("X"); //get latest centroid X
+	eyeL_y_now = getResult("Y"); //get latest centroid Y
+	eyeL_dxWand=(cos(getResult("X"))*getResult("Major")/2)/2;
+	eyeL_dyWand=-(sin(getResult("X"))*getResult("Major")/2)/2;
 	// draw ellipse
 	run("Draw", "slice");
 }
 
-//
-////Left Eye
-//for (i=0; i<nS; i++) {
-//	setSlice(i+1); //slice index starts at 1
-//	//displacing point towards periphery on the major pole of the eye
-//	doWand(eyeL_x_now+eyeL_dxWand, eyeL_y_now+eyeL_dyWand, userTol, "Legacy");
-//	run("Fit Ellipse");
-//	run("Measure");
-//	eyeL_time[i] = i*ifi; //time axis
-//	eyeL_x[i] = getResult("X"); //get latest centroid X
-//	eyeL_y[i] = getResult("Y"); //get latest centroid Y
-//	eyeL_major[i] = getResult("Major"); //get latest major axis
-//	eyeL_minor[i] = getResult("Minor"); //get latest minor axis
-//	eyeL_angle[i] = getResult("Angle"); //get latest angle
-//	eyeL_area[i] = getResult("Area"); //get latest area
-//
-//	//check if fit was lost
-//	if (eyeL_area[i] > eyeL_area_cutoff || abs(eyeL_x[i]-eyeL_x_now) > 20 || abs(eyeL_y[i]-eyeL_y_now) > 20) {
-//		// if fit was lost track for a little bit
-//		interrupt = true;
-// 		interruptCounter = interruptCounter-1;
-// 		// then stop checking
-// 		if (interruptBuffer < 0) {
-// 			interrupt = false;
-// 		}
-//	}
-// 	else {
-//		interruptCounter = interruptBuffer;
-//		interrupt = false;
-//	}
-//	
-//	
-//	if (interrupt) {
-//		print (interruptBuffer);
-// 		Table.deleteRows(i, i);
-// 		waitForUser("Click on LEFT eye");
-// 		run("Fit Ellipse");
-// 		run("Measure");
-// 		eyeL_time[i] = i*ifi; //time axis
-// 		eyeL_x[i] = getResult("X"); //get latest centroid X
-// 		eyeL_y[i] = getResult("Y"); //get latest centroid Y
-// 		eyeL_major[i] = getResult("Major"); //get latest major axis
-// 		eyeL_minor[i] = getResult("Minor"); //get latest minor axis
-// 		eyeL_angle[i] = getResult("Angle"); //get latest angle
-// 		eyeL_area[i] = getResult("Area"); //get latest area
-// 	}
-// 	
-//	// fix angles
-//	if (eyeL_angle[i]>90) {
-// 		eyeL_angle[i] = eyeL_angle[i]-180;
-// 	}
-// 	// update values
-// 	eyeL_x_now = getResult("X"); //get latest centroid X
-//	eyeL_y_now = getResult("Y"); //get latest centroid Y
-//	eyeL_dxWand=(cos(getResult("X"))*getResult("Major")/2)/2;
-//	eyeL_dyWand=-(sin(getResult("X"))*getResult("Major")/2)/2;
-//	// draw ellipse
-//	run("Draw", "slice");
-//}
-//
-//
-////Right Eye
-//for (i=0; i<nS; i++) {
-//	setSlice(i+1); //slice index starts at 1
-//	//displacing point towards periphery on the major pole of the eye
-//	doWand(eyeR_x_now+eyeR_dxWand, eyeR_y_now+eyeR_dyWand, userTol, "Legacy");
-//	run("Fit Ellipse");
-//	run("Measure");
-//	eyeR_time[i] = i*ifi; //time axis
-//	eyeR_x[i] = getResult("X"); //get latest centroid X
-//	eyeR_y[i] = getResult("Y"); //get latest centroid Y
-//	eyeR_major[i] = getResult("Major"); //get latest major axis
-//	eyeR_minor[i] = getResult("Minor"); //get latest minor axis
-//	eyeR_angle[i] = getResult("Angle"); //get latest angle
-//	eyeR_area[i] = getResult("Area"); //get latest area
-//
-//	// could be better to do Right and Left in same loop to check this every time.
-//	eyeDistance = sqrt(pow( abs(eyeR_x[i]-eyeL_x[i]) , 2) + pow( abs(eyeR_y[i]-eyeL_y[i]) ,2));
-//	
-//	//check if fit was lost
-//	if (eyeR_area[i] > eyeR_area_cutoff || abs(eyeR_x[i]-eyeR_x_now) > 20 || abs(eyeR_y[i]-eyeR_y_now) > 20 || eyeDistance < eyeR_major[i]/2) {
-//		// if fit was lost track for a little bit
-//		interrupt = true;
-// 		interruptCounter = interruptCounter-1;
-// 		// then stop checking
-// 		if (interruptBuffer < 0) {
-// 			interrupt = false;
-// 		}
-//	}
-// 	else {
-//		interruptCounter = interruptBuffer;
-//		interrupt = false;
-//	}
-//	
-//
-//	if (interrupt) {
-//		print (interruptBuffer);
-// 		Table.deleteRows(i, i);
-// 		waitForUser("Click on RIGHT eye");
-// 		run("Fit Ellipse");
-// 		run("Measure");
-// 		eyeR_time[i] = i*ifi; //time axis
-// 		eyeR_x[i] = getResult("X"); //get latest centroid X
-// 		eyeR_y[i] = getResult("Y"); //get latest centroid Y
-// 		eyeR_major[i] = getResult("Major"); //get latest major axis
-// 		eyeR_minor[i] = getResult("Minor"); //get latest minor axis
-// 		eyeR_angle[i] = getResult("Angle"); //get latest angle
-// 		eyeR_area[i] = getResult("Area"); //get latest area
-// 	}
-// 	
-//	// fix angles
-//	if (eyeR_angle[i]>90) {
-// 		eyeR_angle[i] = eyeR_angle[i]-180;
-// 	}
-// 	// update values
-// 	eyeR_x_now = getResult("X"); //get latest centroid X
-//	eyeR_y_now = getResult("Y"); //get latest centroid Y
-//	eyeR_dxWand=(cos(getResult("X"))*getResult("Major")/2)/2;
-//	eyeR_dyWand=-(sin(getResult("X"))*getResult("Major")/2)/2;
-//	// draw ellipse
-//	run("Draw", "slice");
-//}
-//
-//setTool("rectangle");
-//run("Select None");
-//
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////Create plot of eye angles
-//Plot.create("eyePhi", "time (s)", "eye angle (deg)")
-//Plot.setLineWidth(2);
-//Plot.setColor("green");
-//Plot.add("line",eyeL_time,eyeL_angle);
-//Plot.setColor("magenta");
-//Plot.add("line",eyeR_time,eyeR_angle);
-//Plot.setLimits(0,eyeR_time[nS-1],-50.0,50.0);
-//Plot.addLegend("R eye\nL eye", "Top-Right Bottom-To-Top Transparent");
+
+//Right Eye
+for (i=0; i<nS; i++) {
+	setSlice(i+1); //slice index starts at 1
+	//displacing point towards periphery on the major pole of the eye
+	doWand(eyeR_x_now+eyeR_dxWand, eyeR_y_now+eyeR_dyWand, userTol, "Legacy");
+	run("Fit Ellipse");
+	run("Measure");
+	eyeR_time[i] = i*ifi; //time axis
+	eyeR_x[i] = getResult("X"); //get latest centroid X
+	eyeR_y[i] = getResult("Y"); //get latest centroid Y
+	eyeR_major[i] = getResult("Major"); //get latest major axis
+	eyeR_minor[i] = getResult("Minor"); //get latest minor axis
+	eyeR_angle[i] = getResult("Angle"); //get latest angle
+	eyeR_area[i] = getResult("Area"); //get latest area
+
+	// could be better to do Right and Left in same loop to check this every time.
+	eyeDistance = sqrt(pow( abs(eyeR_x[i]-eyeL_x[i]) , 2) + pow( abs(eyeR_y[i]-eyeL_y[i]) ,2));
+	
+	//check if fit was lost
+	if (eyeR_area[i] > eyeR_area_cutoff || abs(eyeR_x[i]-eyeR_x_now) > 20 || abs(eyeR_y[i]-eyeR_y_now) > 20 || eyeDistance < eyeR_major[i]/2) {
+		// if fit was lost track for a little bit
+		interrupt = true;
+ 		interruptCounter = interruptCounter-1;
+ 		// then stop checking
+ 		if (interruptBuffer < 0) {
+ 			interrupt = false;
+ 		}
+	}
+ 	else {
+		interruptCounter = interruptBuffer;
+		interrupt = false;
+	}
+	
+
+	if (interrupt) {
+		print (interruptBuffer);
+ 		Table.deleteRows(i, i);
+ 		waitForUser("Click on RIGHT eye");
+ 		run("Fit Ellipse");
+ 		run("Measure");
+ 		eyeR_time[i] = i*ifi; //time axis
+ 		eyeR_x[i] = getResult("X"); //get latest centroid X
+ 		eyeR_y[i] = getResult("Y"); //get latest centroid Y
+ 		eyeR_major[i] = getResult("Major"); //get latest major axis
+ 		eyeR_minor[i] = getResult("Minor"); //get latest minor axis
+ 		eyeR_angle[i] = getResult("Angle"); //get latest angle
+ 		eyeR_area[i] = getResult("Area"); //get latest area
+ 	}
+ 	
+	// fix angles
+	if (eyeR_angle[i]>90) {
+ 		eyeR_angle[i] = eyeR_angle[i]-180;
+ 	}
+ 	// update values
+ 	eyeR_x_now = getResult("X"); //get latest centroid X
+	eyeR_y_now = getResult("Y"); //get latest centroid Y
+	eyeR_dxWand=(cos(getResult("X"))*getResult("Major")/2)/2;
+	eyeR_dyWand=-(sin(getResult("X"))*getResult("Major")/2)/2;
+	// draw ellipse
+	run("Draw", "slice");
+}
+
+setTool("rectangle");
+run("Select None");
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////// Finally, save results as tsv
-////OKRtable = File.open(fPath + "OKR_" + fName + ".txt");
-////// use d2s() function (double to string) to specify decimal places 
-////print(OKRtable, "tAxis" + "\t" + "lX" + "\t" + "lY" + "\t" + "lMajor" + "\t" + "lMinor" + "\t" + "lAngle" + "\t" + "lArea" + "\t" + "rX" + "\t" + "rY" + "\t" + "rMajor" + "\t" + "rMinor" + "\t" + "rAngle" + "\t" + "rArea");
-////for (i=0;i<nS;i++) {
-////	print(OKRtable, d2s(eyeL_time[i],3) + "\t" + d2s(eyeL_x[i],3) + "\t" + d2s(eyeL_y[i],3) + "\t" + d2s(eyeL_major[i],3) + "\t" + d2s(eyeL_minor[i],3) + "\t" + d2s(eyeL_angle[i],3) + "\t" + d2s(eyeL_area[i],1) + "\t" + d2s(eyeR_x[i],3) + "\t" + d2s(eyeR_y[i],3) + "\t" + d2s(eyeR_major[i],3) + "\t" + d2s(eyeR_minor[i],3) + "\t" + d2s(eyeR_angle[i],3) + "\t" + d2s(eyeR_area[i],1));
-////}
-////File.close(OKRtable)
+sb_ref_angle = sb_angle[0];
+sb_angle_plot = newArray(nS);
+eyeL_angle_plot = newArray(nS);
+eyeR_angle_plot = newArray(nS);
+// transform to relative measurement
+for (i=0; i<nS; i++) {
+	eyeL_angle_plot[i] = eyeL_angle[i]-sb_angle[i];
+	eyeR_angle_plot[i] = eyeR_angle[i]-sb_angle[i];
+	sb_angle_plot[i] = sb_angle[i] - sb_ref_angle;
+}
+
+//Create plot of eye angles
+Plot.create("eyePhi", "time (s)", "eye angle (deg)")
+Plot.setLineWidth(2);
+Plot.setColor("gray");
+Plot.add("line",eyeL_time,sb_angle_plot);
+Plot.setColor("green");
+Plot.add("line",eyeL_time,eyeL_angle_plot);
+Plot.setColor("magenta");
+Plot.add("line",eyeR_time,eyeR_angle_plot);
+Plot.setLimits(0,eyeL_time[nS-1],-50.0,50.0);
+Plot.addLegend("Swim Bladder\nL eye\nR eye", "Top-Right Bottom-To-Top Transparent");
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Finally, save results as tsv
+OKRtable = File.open(fPath + "OKR_" + fName + ".txt");
+// use d2s() function (double to string) to specify decimal places 
+print(OKRtable, 
+"tAxis" + "\t" + 
+"lX" + "\t" + "lY" + "\t" + 
+"lMajor" + "\t" + "lMinor" + "\t" + "lAngle" + "\t" + "lArea" + "\t" + 
+"rX" + "\t" + "rY" + "\t" + 
+"rMajor" + "\t" + "rMinor" + "\t" + "rAngle" + "\t" + "rArea" + "\t" +
+"sbX" + "\t" + "sbY" + "\t" + 
+"sbMajor" + "\t" + "sbMinor" + "\t" + "sbAngle" + "\t" + "sbArea");
+for (i=0;i<nS;i++) {
+	print(OKRtable, 
+	d2s(eyeL_time[i],3) + "\t" + 
+	d2s(eyeL_x[i],3) + "\t" + d2s(eyeL_y[i],3) + "\t" + 
+	d2s(eyeL_major[i],3) + "\t" + d2s(eyeL_minor[i],3) + "\t" + 
+	d2s(eyeL_angle[i],3) + "\t" + d2s(eyeL_area[i],1) + "\t" + 
+	d2s(eyeR_x[i],3) + "\t" + d2s(eyeR_y[i],3) + "\t" + 
+	d2s(eyeR_major[i],3) + "\t" + d2s(eyeR_minor[i],3) + "\t" + 
+	d2s(eyeR_angle[i],3) + "\t" + d2s(eyeR_area[i],1) + "\t" + 
+	d2s(sb_x[i],3) + "\t" + d2s(sb_y[i],3) + "\t" + 
+	d2s(sb_major[i],3) + "\t" + d2s(sb_minor[i],3) + "\t" + 
+	d2s(sb_angle[i],3) + "\t" + d2s(sb_area[i],1));
+}
+File.close(OKRtable)
 
