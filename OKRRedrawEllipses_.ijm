@@ -98,7 +98,7 @@ for (i=0; i<nS; i++) {
 	tAxis[i] = getResult("tAxis", i);
 }
 // this seems to work if original movie is 1024 x 544
-run("Plots...", "width=930 height=280 font=14 draw draw_ticks minimum=0 maximum=0 interpolate");
+run("Plots...", "width=930 height=280 font=22 draw draw_ticks minimum=0 maximum=0 interpolate");
 // set up stack window for animated plot
 newImage("aniPlot", "RGB black", w, w/3, 1, 1, nS);
 
