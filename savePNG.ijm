@@ -1,5 +1,5 @@
 fname = getTitle();
-fpath = "/Volumes/zfSSD/LiImaging/A1R/zf/20200807_CRtbx2b/exports/";
+fpath = "/Volumes/zfSSD/LiImaging/A1R/zf/20201113_CRtbx2b/exports/";
 fullpath = fpath + fname;
 
 //reds = newArray(256); 
