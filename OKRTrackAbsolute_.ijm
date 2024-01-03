@@ -22,14 +22,10 @@ run("Clear Results");
 close("tempDuplicate");
 close("eyePhi");
 //#@ Integer (label="Tolerance", style="slider", min=0, max =100, value=17) userTol
-binaryFlag = false;
-sb_areaCut = 0.5;
-eye_areaCut = 0.2;
-sbThreshold = 100; //PTU-treated = 55; non-PTU = 44;
-dFraction = 0.5; // displacement for doWand towards front of the eye
+eye_areaCut = 0.4; // fraction of area change before interrupt triggers
+dFraction = 0.10; // displacement for doWand towards front of the eye
 userTol=17; //wandTolerance for eyes (default = 17)
-sbTol = 30; //wandTolerance for swim bladder (default for PTU = 28)
-ifi = 84/1000; //50/1000; //interframe interval
+ifi = 30/1000; //interframe interval (frames per millisecond)
 fName = replace(getTitle, ".tif", "")
 fPath = getDirectory("image");
 nS = nSlices;
@@ -68,44 +64,8 @@ eyeR_area_ini = getResult("Area");
 eyeR_dxWand=(cos(getResult("Angle")*PI/180)*getResult("Major")/2)*dFraction;
 eyeR_dyWand=-(sin(getResult("Angle")*PI/180)*getResult("Major")/2)*dFraction;
 
-run("Wand Tool...", "tolerance=&sbTol mode=Legacy");
-waitForUser("Click on SWIM BLADDER");
-if (binaryFlag) {
-	run("Measure");
-	sb_x_ini = getResult("X"); //get latest centroid X
-	sb_y_ini = getResult("Y"); //get latest centroid Y
-}
-else {
-	// if not using binary, try to get darkest point in edge for making selection
-	run("Find Maxima...", "prominence=10 light output=[Point Selection]");
-	getSelectionCoordinates(sb_x_ini, sb_y_ini);
-	sb_x_ini = sb_x_ini[0];
-	sb_y_ini = sb_y_ini[0];
-	doWand(sb_x_ini, sb_y_ini, sbTol, "Legacy");
-	run("Fit Ellipse");
-	run("Measure");
-}
-sb_area_ini = getResult("Area");
-print ("sb_area_ini = " + sb_area_ini + ";\n");
 run("Properties... ", "  width=2");
 run("Colors...", "foreground=black background=black selection=cyan");
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-//// Hard-coded
-//eyeL_x_ini = 667;
-//eyeL_y_ini = 250;
-//eyeL_area_cutoff = 2356*1.2;
-//
-//eyeR_x_ini = 667;
-//eyeR_y_ini = 311;
-//eyeR_area_cutoff = 2272*1.2;
-//
-//sb_x_ini = 667;
-//sb_y_ini = 311;
-//sb_area_cutoff = 2272*1.2;
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // create variables to store in csv
@@ -125,14 +85,6 @@ eyeR_major = newArray(nS);
 eyeR_minor = newArray(nS);
 eyeR_angle = newArray(nS);
 eyeR_area = newArray(nS);
-// Swim Bladder
-sb_time = newArray(nS);
-sb_x = newArray(nS);
-sb_y = newArray(nS);
-sb_major = newArray(nS);
-sb_minor = newArray(nS);
-sb_angle = newArray(nS);
-sb_area = newArray(nS);
 
 //set up iteratively updated variables for wand command
 eyeL_x_now = eyeL_x_ini;
@@ -141,8 +93,6 @@ eyeL_y_now = eyeL_y_ini;
 eyeR_x_now = eyeR_x_ini;
 eyeR_y_now = eyeR_y_ini;
 
-sb_x_now = sb_x_ini;
-sb_y_now = sb_y_ini;
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -158,130 +108,10 @@ run("Set Measurements...", "stack area centroid fit redirect=None decimal=3");
 
 //create new stack to draw fits and check quality
 run("Duplicate...", "title=tempDuplicate duplicate");
-setLocation(900,150);
-run("In [+]");
-run("In [+]");
-if (binaryFlag) {
-	run("Options...", "iterations=1 count=1 black pad do=Nothing");
-	setThreshold(0, sbThreshold);
-	run("Convert to Mask", "method=MinError background=Light");
-	run("Invert", "stack");
-	run("Fill Holes", "stack");
-//	run("Erode", "stack");
-	setForegroundColor(120, 120, 120);
-}
-else {
-	setForegroundColor(255, 255, 255);
-}
-
-
-
-//analyse all frames
-setTool("wand");
-run("Wand Tool...", "tolerance=&sbTol mode=Legacy");
-//Swim Bladder
-for (i=0; i<nS; i++) {
-	setSlice(i+1); //slice index starts at 1
-
-//	//FOR DEBUG: plot point of selection (derived from previous frame)
-	makeOval(sb_x_now, sb_y_now, 5, 5);
-	run("Draw", "slice");
-
-	doWand(sb_x_now, sb_y_now, sbTol, "Legacy");
-	run("Fit Ellipse");
-	run("Measure");
-	sb_time[i] = i*ifi; //time axis
-	sb_x[i] = getResult("X"); //get latest centroid X
-	sb_y[i] = getResult("Y"); //get latest centroid Y
-	sb_major[i] = getResult("Major"); //get latest major axis
-	sb_minor[i] = getResult("Minor"); //get latest minor axis
-	sb_angle[i] = getResult("Angle"); //get latest angle
-	sb_area[i] = getResult("Area"); //get latest area
-
-	//check if fit was lost
-	if (sb_area[i] > sb_area_ini*(1+sb_areaCut) || sb_area[i] < sb_area_ini*(1-sb_areaCut)) {
-		// if fit was lost track for a little bit
-		interrupt = true;
- 		interruptCounter = interruptCounter-1;
- 		// then stop checking
- 		if (interruptBuffer < 0) {
- 			interrupt = false;
- 		}
-	}
- 	else {
-		interruptCounter = interruptBuffer;
-		interrupt = false;
-	}
-
-	if (interrupt) {
- 		Table.deleteRows(i, i);
- 		waitForUser("Click on SWIM BLADDER");
- 		run("Fit Ellipse");
- 		run("Measure");
- 		sb_time[i] = i*ifi; //time axis
- 		sb_x[i] = getResult("X"); //get latest centroid X
- 		sb_y[i] = getResult("Y"); //get latest centroid Y
- 		sb_major[i] = getResult("Major"); //get latest major axis
- 		sb_minor[i] = getResult("Minor"); //get latest minor axis
- 		sb_angle[i] = getResult("Angle"); //get latest angle
- 		sb_area[i] = getResult("Area"); //get latest area
- 	}
-
-	// fix angles
-	if (sb_angle[i]>90) {
- 		sb_angle[i] = sb_angle[i]-180;
- 	}
-	// draw ellipse
-	run("Draw", "slice");
-
-	// update values
-	if (binaryFlag) {
-		sb_x_now = getResult("X"); //get latest centroid X
-		sb_y_now = getResult("Y"); //get latest centroid Y
-	}
-	else {
-		// if not using binary, try to get darkest point in edge for making selection
-		run("Find Maxima...", "prominence=10 light output=[Point Selection]");
- 		getSelectionCoordinates(sb_x_now, sb_y_now);
-		sb_x_now = sb_x_now[0];
-		sb_y_now = sb_y_now[0];
-	}
-}
-// Redo duplicate stack and redraw swim bladder ellipses
-close("tempDuplicate");
-run("Duplicate...", "title=tempDuplicate duplicate");
-setLocation(900,150);
+// setLocation(900,150);
+// run("In [+]");
+// run("In [+]");
 setForegroundColor(255, 255, 255);
-run("In [+]");
-run("In [+]");
-drawContour = false;
-for (i=0; i<nS; i++) {
-	setSlice(i+1);
-	re_sb_x = sb_x[i];
-	re_sb_y = sb_y[i];
-	re_sb_r1 = sb_major[i];
-	re_sb_r2 = sb_minor[i];
-
-	if (drawContour){
-		// draw ellipse contour
-		sb_angle = 180-getResult("rAngle",i);
-		run("Specify...", "width=&sb_r1 height=&sb_r2 x=&sb_x y=&sb_y oval centered");
-		run("Rotate...", "angle=&sb_angle");
-		run("Draw", "slice");
-	}
-	else {
-		//draw ellipse axes
-		re_sb_angle = sb_angle[i] * PI/180;
-		makeLine(re_sb_x+cos(re_sb_angle)*re_sb_r1/2, re_sb_y-(sin(re_sb_angle)*re_sb_r1/2),
-			re_sb_x-(cos(re_sb_angle)*re_sb_r1/2), re_sb_y+(sin(re_sb_angle)*re_sb_r1/2));
-		run("Fill", "slice");
-		makeLine(re_sb_x+cos(re_sb_angle+PI/2)*re_sb_r2/2, re_sb_y-(sin(re_sb_angle+PI/2)*re_sb_r2/2),
-			re_sb_x-(cos(re_sb_angle+PI/2)*re_sb_r2/2), re_sb_y+(sin(re_sb_angle+PI/2)*re_sb_r2/2));
-		run("Fill", "slice");
-	}
-
-}
-
 
 //Start Eye tracking
 run("Wand Tool...", "tolerance=&userTol mode=Legacy");
@@ -421,15 +251,12 @@ setTool("rectangle");
 run("Select None");
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-sb_ref_angle = sb_angle[0];
-sb_angle_plot = newArray(nS);
 eyeL_angle_plot = newArray(nS);
 eyeR_angle_plot = newArray(nS);
 // transform to relative measurement
 for (i=0; i<nS; i++) {
-	eyeL_angle_plot[i] = eyeL_angle[i]-sb_angle[i];
-	eyeR_angle_plot[i] = eyeR_angle[i]-sb_angle[i];
-	sb_angle_plot[i] = sb_angle[i] - sb_ref_angle;
+	eyeL_angle_plot[i] = eyeL_angle[i];
+	eyeR_angle_plot[i] = eyeR_angle[i];
 }
 
 //Create plot of eye angles
@@ -437,17 +264,15 @@ run("Plots...", "width=780 height=500 font=22 draw draw_ticks minimum=0 maximum=
 
 Plot.create("eyePhi", "time (s)", "eye angle (deg)")
 Plot.setLineWidth(3);
-Plot.setColor("gray");
-Plot.add("line",eyeL_time,sb_angle_plot);
 Plot.setColor("green");
 Plot.add("line",eyeL_time,eyeL_angle_plot);
 Plot.setColor("magenta");
 Plot.add("line",eyeR_time,eyeR_angle_plot);
-Plot.setLimits(0,eyeL_time[nS-1],-50.0,50.0);
+Plot.setLimits(0,eyeL_time[nS-1],-180.0,180.0);
 Plot.setAxisLabelSize(22.0, "bold");
 Plot.setFontSize(22.0, "options")
 Plot.setFormatFlags("11001100111111");
-Plot.addLegend("Swim Bladder\nL eye\nR eye", "Top-Right Bottom-To-Top Transparent");
+Plot.addLegend("L eye\nR eye", "Top-Right Bottom-To-Top Transparent");
 Plot.show();
 
 selectImage("eyePhi");
@@ -467,9 +292,7 @@ print(OKRtable,
 "lX" + "\t" + "lY" + "\t" +
 "lMajor" + "\t" + "lMinor" + "\t" + "lAngle" + "\t" + "lArea" + "\t" +
 "rX" + "\t" + "rY" + "\t" +
-"rMajor" + "\t" + "rMinor" + "\t" + "rAngle" + "\t" + "rArea" + "\t" +
-"sbX" + "\t" + "sbY" + "\t" +
-"sbMajor" + "\t" + "sbMinor" + "\t" + "sbAngle" + "\t" + "sbArea");
+"rMajor" + "\t" + "rMinor" + "\t" + "rAngle" + "\t" + "rArea");
 for (i=0;i<nS;i++) {
 	print(OKRtable,
 	d2s(eyeL_time[i],3) + "\t" +
@@ -478,9 +301,7 @@ for (i=0;i<nS;i++) {
 	d2s(eyeL_angle[i],3) + "\t" + d2s(eyeL_area[i],1) + "\t" +
 	d2s(eyeR_x[i],3) + "\t" + d2s(eyeR_y[i],3) + "\t" +
 	d2s(eyeR_major[i],3) + "\t" + d2s(eyeR_minor[i],3) + "\t" +
-	d2s(eyeR_angle[i],3) + "\t" + d2s(eyeR_area[i],1) + "\t" +
-	d2s(sb_x[i],3) + "\t" + d2s(sb_y[i],3) + "\t" +
-	d2s(sb_major[i],3) + "\t" + d2s(sb_minor[i],3) + "\t" +
-	d2s(sb_angle[i],3) + "\t" + d2s(sb_area[i],1));
+	d2s(eyeR_angle[i],3) + "\t" + d2s(eyeR_area[i],1)
+	);
 }
 File.close(OKRtable)
